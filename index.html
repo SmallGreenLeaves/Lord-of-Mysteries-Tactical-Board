@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>诡秘之主 · GvG 战术板（v1.0.0）</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark"><span>◈</span></div>
+      <div class="brand-text">
+        <h1>诡秘之主 · 战术板</h1>
+        <span class="brand-sub">GVG TACTICAL BOARD · v1.0.0</span>
+      </div>
+    </div>
+
+    <div class="top-center">
+      <div class="field-inline">
+        <span>战役</span>
+        <input type="text" id="projectName" maxlength="40" spellcheck="false" value="未命名战役">
+      </div>
+      <div class="field-inline">
+        <span>地图</span>
+        <select id="mapSelect"></select>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <span class="save-status" id="saveStatus">新工程</span>
+      <button type="button" class="btn" id="btnScoreCalc">战略服计分</button>
+      <button type="button" class="btn" id="btnAnalysis">战后分析</button>
+      <button type="button" class="btn" id="btnImport">导入 JSON</button>
+      <button type="button" class="btn gold" id="btnExport">导出 JSON</button>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <!-- 左侧：队伍编制 + 地图态势 + 攻城态势 -->
+    <aside class="panel panel-left">
+      <div class="panel-head">
+        <h2>当前编成 · 实时</h2>
+        <span class="tag" id="liveCount">0</span>
+      </div>
+      <div class="panel-body panel-body-live">
+        <button type="button" class="btn gold wide" id="btnTeamConfig" aria-pressed="false" aria-controls="teamOverlay" style="margin-top:0">编队配置</button>
+        <div class="hint-block">
+          左栏实时反映配置窗口里的编成（改动约 0.4 秒后自动保存）。点缩略阵列 → 进入编队配置；拖动整块 → 沙盘生成队伍标记；拖动其中单个色块 → 沙盘生成单人标记。
+        </div>
+        <div class="live-list" id="liveList"></div>
+      </div>
+    </aside>
+
+    <!-- 中央：工具栏 + 沙盘 + 阶段条 -->
+    <main class="center">
+      <div class="toolbar" id="toolButtons">
+        <div class="tool-group">
+          <button type="button" class="tool active" data-tool="select">选择</button>
+          <button type="button" class="tool" data-tool="hand">抓手</button>
+        </div>
+        <div class="tool-sep"></div>
+        <div class="tool-group">
+          <button type="button" class="tool" data-tool="route">路线</button>
+        </div>
+        <div class="tool-sep"></div>
+        <div class="tool-group">
+          <button type="button" class="tool tool-group-btn" id="btnLineGroup" data-tool="attack" title="画线工具组：左键使用当前工具，右键切换具体工具">进攻</button>
+          <button type="button" class="tool" data-tool="rallyFlag">集结</button>
+          <button type="button" class="tool" data-tool="zoneRect">矩形</button>
+          <button type="button" class="tool" data-tool="zoneCircle">圆形</button>
+          <button type="button" class="tool" data-tool="note">标注</button>
+        </div>
+        <div class="tool-sep"></div>
+        <div class="tool-group tool-group-new">
+          <button type="button" class="tool" data-tool="skill">技能</button>
+          <button type="button" class="tool" data-tool="teamPlace">团队</button>
+          <div class="tool-sub-panel hidden" id="skillToolPanel">
+            <select class="tool-sub-select" id="skillToolType" title="技能范围形状">
+              <option value="circle">圆形</option>
+              <option value="sector">扇形</option>
+              <option value="rect">矩形</option>
+            </select>
+          </div>
+          <div class="tool-sub-panel hidden" id="teamToolPanel">
+            <select class="tool-sub-select" id="teamToolKind" title="标记级别"></select>
+            <select class="tool-sub-select" id="teamToolColor" title="敌方颜色"></select>
+            <input type="number" class="tool-sub-input" id="teamToolCount" title="人数（落点前指定）" min="0" max="150" step="1" value="0">
+          </div>
+        </div>
+        <div class="tool-sep"></div>
+        <button type="button" class="btn mini" id="btnUndo">撤销</button>
+        <button type="button" class="btn mini" id="btnRedo">重做</button>
+        <button type="button" class="btn mini" id="btnDelete">删除</button>
+        <button type="button" class="btn mini" id="btnClear">清除本层</button>
+        <button type="button" class="btn mini" id="btnSnap">吸附网格</button>
+        <div class="spacer"></div>
+        <span class="zoom-label" id="zoomLabel">100%</span>
+      </div>
+
+      <div class="board-wrap">
+        <svg id="board" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <pattern id="gridPattern" width="32" height="32" patternUnits="userSpaceOnUse">
+              <path id="gridLine" d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.05" stroke-width="1"></path>
+            </pattern>
+            <!-- 霍纳奇斯山脉：水域（可游泳）与冰湖（可行走）用不同色与纹理，两个独立语义层 -->
+            <pattern id="waterHatch" width="10" height="10" patternUnits="userSpaceOnUse">
+              <rect width="10" height="10" fill="#2c628f" fill-opacity="0.62"></rect>
+              <path d="M0 10L10 0" stroke="#8cc2e8" stroke-width="1" stroke-opacity="0.45"></path>
+            </pattern>
+            <pattern id="iceHatch" width="12" height="12" patternUnits="userSpaceOnUse">
+              <rect width="12" height="12" fill="#122846" fill-opacity="0.9"></rect>
+              <path d="M6 0V12M0 6H12" stroke="#6f93b8" stroke-width="0.8" stroke-opacity="0.45"></path>
+            </pattern>
+            <!-- 雪地：普通可行走地面，冷白灰细密点纹，与冰湖（深蓝十字）区分，低饱和不抢标记 -->
+            <pattern id="snowHatch" width="8" height="8" patternUnits="userSpaceOnUse">
+              <rect width="8" height="8" fill="#c2ccd8" fill-opacity="0.34"></rect>
+              <path d="M0 4H8" stroke="#e6edf4" stroke-width="0.7" stroke-opacity="0.34"></path>
+              <circle cx="2" cy="1" r="0.5" fill="#eef3f8" fill-opacity="0.5"></circle>
+              <circle cx="6" cy="6" r="0.5" fill="#eef3f8" fill-opacity="0.5"></circle>
+            </pattern>
+            <pattern id="cliffHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+              <rect width="6" height="6" fill="#5a3a18" fill-opacity="0.16"></rect>
+              <path d="M0 0V6" stroke="#c08740" stroke-width="1.1" stroke-opacity="0.5"></path>
+            </pattern>
+            <radialGradient id="fogGlow" cx="50%" cy="46%" r="72%">
+              <stop offset="0%" stop-color="#243447" stop-opacity="0.55"></stop>
+              <stop offset="60%" stop-color="#101823" stop-opacity="0.18"></stop>
+              <stop offset="100%" stop-color="#000000" stop-opacity="0"></stop>
+            </radialGradient>
+            <!-- 原图底图模式：石碑 / 城门 / 平台 / 点位 / 文字压在原图上，白描边 + 深阴影保证亮暗区都可读 -->
+            <filter id="photoHalo" x="-40%" y="-40%" width="180%" height="180%">
+              <feDropShadow in="SourceGraphic" dx="0" dy="0" stdDeviation="2" flood-color="#ffffff" flood-opacity="0.9" result="whiteHalo"></feDropShadow>
+              <feDropShadow in="SourceGraphic" dx="0" dy="0" stdDeviation="1.1" flood-color="#000000" flood-opacity="0.65" result="darkHalo"></feDropShadow>
+              <feMerge>
+                <feMergeNode in="darkHalo"></feMergeNode>
+                <feMergeNode in="whiteHalo"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+              </feMerge>
+            </filter>
+            <marker id="diffHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#79b6a0"></path>
+            </marker>
+          </defs>
+          <g id="viewport">
+            <g id="layer-base"></g>
+            <g id="layer-zones"></g>
+            <g id="layer-routes"></g>
+            <g id="layer-markers"></g>
+            <g id="layer-notes"></g>
+            <g id="layer-overlay"></g>
+          </g>
+        </svg>
+
+        <div class="board-hud">
+          <span id="hudMap">地图</span>
+          <span class="hud-chip hidden" id="hudLevel">地面层</span>
+          <span class="hud-chip hidden" id="hudScale">1 unit = 0.00 px</span>
+          <span class="hud-chip hidden" id="hudWidth">此处约 0 人并排</span>
+          <span class="hud-chip" id="hudCoord">x 0 · y 0</span>
+        </div>
+        <div class="board-hint" id="boardHint">选择模式：拖动标记调整位置；在空白处拖动可平移沙盘。</div>
+      </div>
+
+      <div class="phasebar">
+        <div class="phasebar-row">
+          <span class="phasebar-label">方案</span>
+          <select class="plan-select" id="planSelect"></select>
+          <button type="button" class="btn mini" id="btnPlanNew">新建</button>
+          <button type="button" class="btn mini" id="btnPlanCopy">复制</button>
+          <button type="button" class="btn mini" id="btnPlanRename">改名</button>
+          <button type="button" class="btn mini danger" id="btnPlanDelete">删除</button>
+        </div>
+        <div class="phasebar-row">
+          <span class="phasebar-label">阶段</span>
+          <div class="phase-chips" id="phaseChips"></div>
+          <button type="button" class="btn mini" id="btnPhaseAdd">＋阶段</button>
+          <button type="button" class="btn mini" id="btnPhaseRename">改名</button>
+          <button type="button" class="btn mini danger" id="btnPhaseDelete">删除</button>
+          <button type="button" class="btn mini gold" id="btnPlay">▶ 播放</button>
+          <button type="button" class="btn mini" id="btnDiff">差异</button>
+          <span class="diff-summary" id="diffSummary"></span>
+        </div>
+      </div>
+
+      <section class="sim-dock is-collapsed" id="simDock">
+        <div class="sim-head">
+          <h2>战术推演</h2>
+          <span class="tag" id="simModeTag">模式</span>
+          <span class="sim-note">所有系数为假设值，可调</span>
+          <div class="spacer"></div>
+          <button type="button" class="btn mini" id="btnSimToggle" aria-expanded="false" aria-controls="simControls" title="展开 / 收起战术推演面板">推演</button>
+          <button type="button" class="btn mini gold" id="btnSimSave">保存推演参数</button>
+          <button type="button" class="btn mini ghost" id="btnSimClose">收起</button>
+        </div>
+        <div class="sim-body">
+          <div class="sim-controls" id="simControls"></div>
+          <div class="sim-result" id="simResult"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 右侧：未选中=地图态势 / 选中=属性检查器，图层区块常驻 -->
+    <aside class="panel panel-right">
+      <div class="panel-head">
+        <h2 id="rightTitle">地图态势</h2>
+        <span class="tag" id="inspectorKind">未选择</span>
+      </div>
+      <div class="panel-body right-body">
+        <div class="right-view" id="rightSituation">
+          <div class="card">
+            <div class="card-head">
+              <h3>地图态势</h3>
+              <span class="tag" id="mapModeTag">—</span>
+            </div>
+            <div class="card-body" id="mapMeta"></div>
+          </div>
+          <div class="card siege-card" id="siegeCard"></div>
+          <div class="card siege-card" id="modeStatus"></div>
+        </div>
+        <div class="right-view hidden inspector" id="inspector"></div>
+      </div>
+
+      <div class="panel-head sub">
+        <h2>图层</h2>
+        <span class="tag" id="layerLevelTag">单层</span>
+      </div>
+      <div class="panel-body layers-body" id="layersPanel" style="flex:0 0 auto;max-height:46%;overflow-y:auto"></div>
+
+      <div class="panel-credit">v1.0.0 · 创作者：小绿叶子，Deepseek-v4.1-Flash</div>
+    </aside>
+  </div>
+</div>
+
+<div id="modalRoot" class="modal-root hidden"></div>
+
+<!-- 编队配置：全屏覆盖式窗口（非 window.open，file:// 可用） -->
+<div class="config-overlay hidden" id="teamOverlay">
+  <div class="config-shell raid-shell">
+    <header class="config-head">
+      <div class="config-title">
+        <h2>编队</h2>
+        <button type="button" class="info-btn" id="teamLayoutInfo" aria-label="编队窗口布局说明"
+          data-info-tip="左：队伍配置 · 中：候补池（拖到左侧格子即可上场） · 右：编成总览">ⓘ</button>
+      </div>
+      <div class="spacer"></div>
+      <span class="config-save-status is-saved" id="configSaveStatus" title="编成改动会自动写入 localStorage">实时保存已启用</span>
+      <span class="head-sep"></span>
+      <button type="button" class="btn mini tone-green" id="btnRosterImport" title="打开导入面板：先看格式要求，再选择文件并预览确认">一键导入</button>
+      <button type="button" class="btn mini" id="btnRosterExport" title="按模板列序导出 CSV；JSON 为全量备份">一键导出</button>
+      <button type="button" class="btn mini" id="btnPresetList">预设列表</button>
+      <button type="button" class="btn mini gold" id="btnPresetSave">另存为预设</button>
+      <button type="button" class="btn mini ghost" id="btnConfigClose" title="关闭（Esc）">✕</button>
+    </header>
+
+    <div class="raid-grid">
+      <!-- 左：队伍配置 -->
+      <section class="raid-col raid-col-config">
+        <div class="raid-col-head">
+          <h3>队伍配置</h3>
+          <span class="tag" id="configScopeTag">联盟 → 团队 → 小队</span>
+          <div class="spacer"></div>
+          <button type="button" class="info-btn" id="gridOpsInfo" aria-label="格子操作说明"
+            data-info-tip="点空格子 = 按行生成队员（第1行战士…第6行观众）；点已填格子 = 打开编辑；抽屉开着时点其他色块 = 直接切换成员；点空白 = 关闭抽屉回全员视图；拖动色块跨列 = 跨小队换人；双击列头改名。">ⓘ</button>
+          <button type="button" class="btn mini" id="btnBatchSelect" title="进入批量选择模式（Shift 连选 / 框选 / 按小队·团队·职业全选，Esc 退出）">批量操作</button>
+        </div>
+        <div class="config-body">
+          <div class="config-level">
+            <div class="level-label">联盟</div>
+            <div class="tab-row" id="allianceTabs"></div>
+          </div>
+          <div class="config-level">
+            <div class="level-label">团队</div>
+            <div class="tab-row" id="teamTabs"></div>
+          </div>
+          <div class="config-main" id="squadStack"></div>
+        </div>
+      </section>
+
+      <!-- 中：候补池（拖到左侧格子即可上场） -->
+      <aside class="raid-col raid-col-pool" id="poolPanel">
+        <div class="raid-col-head">
+          <h3>候补池</h3>
+          <span class="tag" id="poolTotal">0 人 · 不占编制</span>
+          <div class="spacer"></div>
+          <button type="button" class="btn mini gold" id="btnPoolAdd">＋ 添加</button>
+        </div>
+        <div class="pool-tools">
+          <label class="pool-tool">职业
+            <select id="poolClassFilter"></select>
+          </label>
+          <label class="pool-tool">搜索
+            <input type="search" id="poolSearch" placeholder="按角色名搜索…" spellcheck="false">
+          </label>
+          <span class="pool-filter-note" id="poolFilterNote"></span>
+          <div class="spacer"></div>
+          <span class="pool-drop-tip">池 → 左侧格子 = 上场（有人则交换）· 左侧格子 → 这里 = 调出</span>
+        </div>
+        <div class="pool-grid" id="poolGrid"></div>
+      </aside>
+
+      <!-- 右：编成总览（只读） -->
+      <aside class="raid-col raid-col-overview">
+        <div class="raid-col-head">
+          <h3>编成总览</h3>
+          <span id="overviewSub">只读 · 实时跟随</span>
+        </div>
+        <div class="overview-body" id="overviewBody"></div>
+      </aside>
+    </div>
+
+    <div class="batch-bar hidden" id="batchBar"></div>
+
+    <div class="config-trash" id="configTrash">拖到这里 = 移出队伍</div>
+    <div class="drag-hint hidden" id="dragHint"></div>
+    <aside class="member-drawer hidden" id="memberDrawer"></aside>
+
+    <!-- 一键导入：二级面板（格式说明 / 模板下载 / 选择或拖入文件） -->
+    <div class="roster-modal hidden" id="rosterImport">
+      <div class="roster-card roster-card-import">
+        <header class="roster-head">
+          <h3>一键导入 · 成员模板</h3>
+          <span class="roster-source">xlsx / xlsm / csv</span>
+          <div class="spacer"></div>
+          <button type="button" class="btn mini ghost" id="rosterImportClose" title="关闭（Esc）">✕</button>
+        </header>
+        <div class="roster-body">
+          <div class="roster-section import-spec">
+            <h4>格式要求</h4>
+            <ol class="import-spec-list import-spec-flow">
+              <li><b>文件</b>：只接受 .xlsx / .xlsm / .csv。xlsx 优先读名为「成员导入模板」的工作表，找不到就取第一个；CSV 按单表解析，列序须与模板一致。</li>
+              <li><b>表结构</b>：固定 5 联盟 × 5 团队 × 5 小队的模板骨架，每个团队块 9 行、占 A–T 20 列，自上而下是联盟行 → 团队行 → 小队表头 → 字段行 → 6 行成员，不要增删行列。</li>
+              <li><b>必填</b>：每小队的「名字」格必填，技能 / 人脉 / 密偶可留空；名字格要带职业底色。</li>
+              <li><b>职业</b>：只看名字格填充色，对照 U2–U7 图例（战士 / 歌颂 / 占卜 / 学徒 / 窥秘 / 观众）；无色或颜色不在图例时按行序回落（第 1 行战士 … 第 6 行观众），预览会标「默」「色?」。</li>
+              <li><b>候补</b>：U9 写「候补人员」，U10 起每行一个名字；表尾 <b>A231</b> 写 <b>%END%</b>。候补不占正式编制，导入后进候补池。</li>
+            </ol>
+            <details class="import-spec-more">
+              <summary>查看完整规范</summary>
+              <ul class="import-spec-list">
+                <li><b>合并单元格</b>：联盟行、团队行各合并 20 列（A–T），每个小队表头合并 4 列；模板自带的合并不要拆开。</li>
+                <li><b>字段列序</b>：每个小队固定「名字 / 技能 / 人脉 / 密偶」四列，5 组循环铺满 20 列。</li>
+                <li><b>编号</b>：联盟 1–5、团队 1–25、小队 1–125，全表连续，不能跳号。</li>
+                <li><b>图例区</b>：U1 必须是「图例」，U2–U7 保留模板职业色板；名字格的颜色是职业的唯一依据。</li>
+                <li><b>未识别颜色</b>：不当作职业，按行序回落；预览标「色?」并按该行默认职业，无填充标「默」。</li>
+                <li><b>兼容</b>：旧版模板（A1 以「团队」开头）不再支持；浏览器无法解压 xlsx 时，请把模板另存为 CSV 再导入。</li>
+              </ul>
+            </details>
+          </div>
+          <div class="import-file-row">
+            <button type="button" class="btn mini tone-blue" id="btnRosterTemplate" title="把 assets/templates/成员导入模板.xlsx 复制到指定目录（不可用时存到默认下载目录）">下载模板</button>
+            <span class="import-file-name" id="rosterImportFile">尚未选择文件</span>
+          </div>
+          <div class="import-drop" id="rosterDrop">
+            <div class="import-drop-title">拖入 .xlsx / .xlsm / .csv，或点击选择文件</div>
+            <div class="import-drop-sub">本地解析，不联网、不上传、不改原文件</div>
+            <input type="file" id="rosterFile" hidden accept=".xlsx,.xlsm,.csv">
+          </div>
+          <p class="roster-line dim import-fail-hint">导入失败多半是表头/编号被改、合并被拆、图例色块丢失、用了旧版模板或文件为空——预览会指出第一处偏差，按提示修正即可。</p>
+          <p class="roster-line dim">选择文件后先进入预览：成员、位置、职业来源、冲突与跳过都会列出；只有点「确认导入」才写入编成，取消或关闭都不落数据。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 一键导入：预览 / 冲突清单（固定模板：联盟行 → 团队行 → 小队行 → 字段行 → 6 成员行，5 联盟 × 5 团队纵向） -->
+    <div class="roster-modal hidden" id="rosterPreview">
+      <div class="roster-card">
+        <header class="roster-head">
+          <h3>导入预览</h3>
+          <span class="roster-source" id="rosterSource"></span>
+          <div class="spacer"></div>
+          <button type="button" class="btn mini ghost" id="rosterPreviewClose" title="取消（Esc）">✕</button>
+        </header>
+        <div class="roster-body" id="rosterPreviewBody"></div>
+        <footer class="roster-foot">
+          <span class="roster-note">冲突不会静默覆盖；确认后可用 Ctrl+Z 撤销。</span>
+          <div class="spacer"></div>
+          <button type="button" class="btn mini ghost" id="rosterCancel">取消</button>
+          <button type="button" class="btn mini" id="rosterModeEmpty">确认导入（只填空位）</button>
+          <button type="button" class="btn mini gold" id="rosterModeOverwrite">确认导入（全部覆盖）</button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- 一键导入：不符合模板时的第一处偏差提示 -->
+    <div class="roster-modal hidden" id="rosterTemplateHint">
+      <div class="roster-card roster-card-sm">
+        <header class="roster-head">
+          <h3>模板不匹配</h3>
+          <div class="spacer"></div>
+          <button type="button" class="btn mini ghost" id="rosterHintClose" title="关闭（Esc）">✕</button>
+        </header>
+        <div class="roster-body" id="rosterTemplateHintBody"></div>
+        <footer class="roster-foot">
+          <span class="roster-note">只接受 assets/templates/成员导入模板.xlsx 的「成员导入模板」表。</span>
+          <div class="spacer"></div>
+          <button type="button" class="btn mini ghost" id="rosterHintOk">关闭</button>
+          <button type="button" class="btn mini gold" id="rosterHintDownload">下载导入模板</button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- 一键导出：格式选择 -->
+    <div class="roster-modal hidden" id="rosterExport">
+      <div class="roster-card roster-card-sm">
+        <header class="roster-head">
+          <h3>一键导出</h3>
+          <div class="spacer"></div>
+          <button type="button" class="btn mini ghost" id="rosterExportClose" title="关闭">✕</button>
+        </header>
+        <div class="roster-body">
+          <p class="roster-line">CSV 按模板列序导出：联盟1–5 / 团队1–25 × 5 小队 × 6 行 × 4 列（名字 / 技能 / 人脉 / 密偶），U 列写图例与候补名单，可直接贴回模板再导入。</p>
+          <p class="roster-line dim">CSV 为 UTF-8 带 BOM，Excel 直接打开不乱码；JSON 为全量备份（25 团队 + 候补池 + 空槽与元数据）。<br>说明：暂不提供 xlsx 导出，本次只提供 CSV / JSON。</p>
+        </div>
+        <footer class="roster-foot">
+          <div class="spacer"></div>
+          <button type="button" class="btn mini" id="rosterExportJson">导出 JSON</button>
+          <button type="button" class="btn mini gold" id="rosterExportCsv">导出 CSV</button>
+        </footer>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast-root" id="toastRoot"></div>
+
+<!-- 战后分析：全屏覆盖窗口（页签式，纯前端解析 xlsx，零外链） -->
+<div class="analysis-overlay hidden" id="analysisOverlay">
+  <div class="analysis-shell">
+    <header class="config-head analysis-head">
+      <div class="config-title">
+        <h2>战后分析</h2>
+        <span class="tag" id="analysisScopeTag">未导入</span>
+      </div>
+      <span class="config-hint">纯前端解析 xlsx · 零依赖 · 零外链 · 只读不改原文件</span>
+      <div class="spacer"></div>
+      <button type="button" class="btn mini" id="analysisExportCsv">导出 CSV</button>
+      <button type="button" class="btn mini gold" id="analysisExportJson">导出 JSON</button>
+      <button type="button" class="btn mini ghost" id="analysisClose" title="关闭（Esc）">✕</button>
+    </header>
+
+    <nav class="analysis-tabs" id="analysisTabs">
+      <button type="button" data-tab="import">1 · 导入</button>
+      <button type="button" data-tab="mapping">2 · 列映射</button>
+      <button type="button" data-tab="players">3 · 逐人分析</button>
+      <button type="button" data-tab="team">4 · 整体分析</button>
+      <button type="button" data-tab="issues">5 · 疑点清单</button>
+      <button type="button" data-tab="settings">阈值</button>
+    </nav>
+
+    <div class="analysis-panels">
+      <section class="analysis-panel" data-panel="import"></section>
+      <section class="analysis-panel" data-panel="mapping" hidden></section>
+      <section class="analysis-panel" data-panel="players" hidden></section>
+      <section class="analysis-panel" data-panel="team" hidden></section>
+      <section class="analysis-panel" data-panel="issues" hidden></section>
+      <section class="analysis-panel" data-panel="settings" hidden></section>
+    </div>
+  </div>
+</div>
+
+<!-- 战略服筛选积分计算器：独立覆盖窗口，只算局外积分，不写工程存档 -->
+<div class="analysis-overlay hidden" id="scoreCalcOverlay">
+  <div class="analysis-shell" id="scoreCalcShell">
+    <header class="config-head analysis-head">
+      <div class="config-title">
+        <h2>战略服筛选积分</h2>
+        <span class="tag" id="scScopeTag">战略服 · 规则图原文</span>
+      </div>
+      <span class="config-hint">独立计算 · 零依赖 · 零外链 · 不写工程存档（仅本地草稿）</span>
+      <div class="spacer"></div>
+      <button type="button" class="btn mini ghost" id="scClose" title="关闭（Esc）">✕</button>
+    </header>
+
+    <nav class="analysis-tabs" id="scTabs">
+      <button type="button" data-tab="season">俱乐部联表</button>
+      <button type="button" data-tab="rules">规则数值表</button>
+    </nav>
+
+    <div class="analysis-panels">
+      <section class="analysis-panel sc-panel" data-panel="season">
+        <div id="scSeasonBody"></div>
+        <div id="scSeasonResult"></div>
+      </section>
+      <section class="analysis-panel sc-panel" data-panel="rules" hidden>
+        <div id="scRules"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- 经典 script 顺序加载：不使用 ES module / import，保证 file:// 双击可运行 -->
+<script src="data/classes.js"></script>
+<script src="data/maps.js"></script>
+<script src="js/util.js"></script>
+<script src="js/state.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/roster.js"></script>
+<script src="js/template.js"></script>
+<script src="js/teams.js"></script>
+<script src="js/board.js"></script>
+<script src="js/draw.js"></script>
+<script src="js/plans.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/xlsx.js"></script>
+<script src="js/analysis.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/scorecalc.js"></script>
+</body>
+</html>
