@@ -26,12 +26,14 @@
       aliases: ['承受伤害', '承伤', '受到伤害', '被伤害', 'taken'] },
     { key: 'heal', label: '治疗', desc: '治疗量；仅治疗职业有值',
       aliases: ['治疗', '治疗量', 'heal', 'healing'] },
+    { key: 'purify', label: '净化（烧尸）', desc: '歌颂职业烧尸体数量（防对面奶妈复活）；源表无「净化 / 烧尸 / 净化数量」列时需手动映射，空白 = 不适用',
+      aliases: ['净化数量', '净化次数', '净化', '烧尸数量', '烧尸数', '烧尸', 'purify', 'purified', 'burned', 'burn'] },
     { key: 'death', label: '死亡数', desc: '可选；映射后作为附加维度',
       aliases: ['死亡', '死亡数', '阵亡', 'deaths', 'death'] }
   ];
 
   /* 统计用到的原始指标（全部来自表格） */
-  var METRICS = ['damage', 'taken', 'heal', 'ka', 'deaths'];
+  var METRICS = ['damage', 'taken', 'heal', 'ka', 'deaths', 'purify'];
 
   /* 派生指标（由原始值计算） */
   var DERIVED = ['ratio', 'outEff', 'takenEff', 'takenRatio', 'killConv', 'healEff'];
@@ -56,6 +58,9 @@
     { key: 'heal', label: '治疗量', weightKey: 'wHeal', thresholdKey: 'healLow',
       formula: '治疗量 / 同职业治疗中位数；以及 治疗量 / (击败 + 助攻)（治疗口径）',
       norm: '异常度 = max(治疗倍数阈值缺口, 治疗效率阈值缺口)，截断到 0–1' },
+    { key: 'purify', label: '净化（烧尸）', weightKey: 'wPurify', thresholdKey: 'purifyLow',
+      formula: '净化（烧尸）数量 / 同职业净化中位数（仅歌颂职业；需映射净化列）',
+      norm: '异常度 = (purifyLow − 本人倍数) / purifyLow，截断到 0–1；0 = 真实 0（倍数按 0 算），空白 = 不适用' },
     { key: 'death', label: '死亡偏高', weightKey: 'wDeath', thresholdKey: 'deathHigh',
       formula: '死亡 / 同职业死亡中位数（需映射死亡列）',
       norm: '异常度 = 死亡倍数/deathHigh − 1，截断到 0–1' },
@@ -77,6 +82,7 @@
     contribQ1: 1.0,
     healLow: 0.5,
     healEffLow: 0.7,
+    purifyLow: 0.5,
     deathHigh: 1.5,
     assistLow: 0.35,
     scoreLow: 0.18,
@@ -88,6 +94,7 @@
     wConv: 0.15,
     wContrib: 0.15,
     wHeal: 0.1,
+    wPurify: 0.15,
     wDeath: 0.1,
     wAssist: 0.1,
     zeroRulesOn: true,
@@ -126,6 +133,8 @@
       desc: '治疗量低于同职业中位数的百分比，例：0.5 = 只到中位的一半才提示' },
     { group: 'threshold', key: 'healEffLow', label: '治疗效率低位线', min: 0.1, max: 1.5, step: 0.05, unit: '×中位',
       desc: '治疗/(击败+助攻) 低于同职业中位的百分比，例：0.7' },
+    { group: 'threshold', key: 'purifyLow', label: '净化量低位线（假设值）', min: 0.1, max: 1.5, step: 0.05, unit: '×中位',
+      desc: '假设值 0.5：歌颂净化（烧尸）数量低于同职业中位的 50% 即记异常；仅歌颂职业适用，空白不告警' },
     { group: 'threshold', key: 'deathHigh', label: '死亡偏高线', min: 0.5, max: 4, step: 0.1, unit: '×中位',
       desc: '死亡高于同职业中位的倍数；仅在映射了死亡列时生效，例：1.5' },
     { group: 'threshold', key: 'assistLow', label: '助攻参与底线（坦克）', min: 0.05, max: 1, step: 0.01, unit: '%',
@@ -142,6 +151,8 @@
       desc: '仅输出口径适用；治疗口径有伤害时减半' },
     { group: 'weight', key: 'wHeal', label: '权重 · 治疗量', min: 0, max: 1, step: 0.05, unit: '权重',
       desc: '治疗口径会被放大，成为主维度' },
+    { group: 'weight', key: 'wPurify', label: '权重 · 净化（烧尸）（假设值）', min: 0, max: 1, step: 0.05, unit: '权重',
+      desc: '假设值 0.15：仅歌颂职业适用，按适用维度归一化；与其他维度共同决定综合异常分' },
     { group: 'weight', key: 'wDeath', label: '权重 · 死亡偏高', min: 0, max: 1, step: 0.05, unit: '权重',
       desc: '仅在映射了死亡列时参与加权' },
     { group: 'weight', key: 'wAssist', label: '权重 · 助攻参与度', min: 0, max: 1, step: 0.05, unit: '权重',
@@ -174,7 +185,7 @@
   /* 职业 → 口径：观众 = 治疗，战士 = 坦克，歌颂 / 学徒 / 占卜 / 窥秘 = 输出 */
   var PROFILE_LABELS = { output: '输出口径', heal: '治疗口径', tank: '坦克口径' };
   var PROFILE_DESC = {
-    output: '歌颂 / 学徒 / 占卜 / 窥秘：评输出占比、输出效率、承伤合理性、击杀转化、团队贡献',
+    output: '歌颂 / 学徒 / 占卜 / 窥秘：评输出占比、输出效率、承伤合理性、击杀转化、团队贡献（歌颂另评净化）',
     heal: '观众：只评治疗量、治疗效率与承伤生存提示；不评伤害、输出效率、击杀转化、击败+助攻',
     tank: '战士：只评承伤合理性（过高 / 过低）与助攻参与；不评伤害、输出效率、击杀转化'
   };
@@ -209,7 +220,7 @@
     standard: { label: '标准', lowMul: 1, highMul: 1, barMul: 1, bandMul: 1 },
     strict: { label: '严格', lowMul: 1.2, highMul: 0.85, barMul: 1.1, bandMul: 0.9 }
   };
-  var LOW_KEYS = ['shareLow', 'effLow', 'convLow', 'healLow', 'healEffLow', 'assistLow', 'takenLow'];
+  var LOW_KEYS = ['shareLow', 'effLow', 'convLow', 'healLow', 'healEffLow', 'purifyLow', 'assistLow', 'takenLow'];
   var HIGH_KEYS = ['takenHigh', 'takenRatioHigh', 'deathHigh'];
   var BAR_KEYS = ['contribQ1'];
   var BAND_KEYS = ['scoreLow', 'scoreMid', 'scoreHigh'];
@@ -460,6 +471,8 @@
       var damage = numAt(row, idx.damage);
       var taken = numAt(row, idx.taken);
       var heal = numAt(row, idx.heal);
+      /* 净化（烧尸）只对歌颂有意义：其他职业一律按空白（不适用）处理，不进分组统计、不告警 */
+      var purify = String(className).indexOf('歌颂') >= 0 ? numAt(row, idx.purify) : null;
       var deaths = numAt(row, idx.death);
 
       var ka = (wins != null && assists != null) ? wins + assists : null;
@@ -485,6 +498,7 @@
         damage: damage,
         taken: taken,
         heal: heal,
+        purify: purify,
         deaths: deaths,
         ratio: ratio,
         outEff: outEff,
@@ -634,12 +648,18 @@
     };
   }
 
+  /* 歌颂是唯一对「净化（烧尸）」有意义的职业 */
+  function isSinger(p) {
+    return String(p.className || '').indexOf('歌颂') >= 0;
+  }
+
   function dimAvailable(p, key) {
     if (key === 'share') return p.damage != null;
     if (key === 'eff') return p.damage != null && p.ka != null;
     if (key === 'taken') return p.taken != null;
     if (key === 'conv' || key === 'contrib') return p.ka != null;
     if (key === 'heal') return p.heal != null;
+    if (key === 'purify') return p.purify != null;
     if (key === 'death') return p.deaths != null;
     if (key === 'assist') return p.assists != null;
     return false;
@@ -647,6 +667,8 @@
 
   /* 口径是否允许该维度：治疗口径只有在伤害列确有输出时才附加评估输出类维度 */
   function profileAllows(p, key) {
+    /* 净化是歌颂的专属职责，其余职业该列空白 = 不适用，不参与打分也不告警 */
+    if (key === 'purify') return isSinger(p);
     var allow = (PROFILE_ALLOW[p.profile] || {})[key];
     if (!allow) return false;
     if (p.profile === 'heal' && OUTPUT_CORE_KEYS.indexOf(key) >= 0) {
@@ -656,6 +678,11 @@
   }
 
   function naTextOf(p, key) {
+    if (key === 'purify') {
+      if (!isSinger(p)) return '仅歌颂职业统计净化（其他职业该列空白不告警）';
+      if (colOf('purify') < 0) return '源表无净化列，需在「列映射」手动指定';
+      return '本场无净化数据（空白 = 不适用）';
+    }
     var allow = (PROFILE_ALLOW[p.profile] || {})[key];
     if (!allow) return PROFILE_LABELS[p.profile] + '不评这项指标';
     if (p.profile === 'heal' && OUTPUT_CORE_KEYS.indexOf(key) >= 0 && !(p.damage != null && p.damage > 0)) {
@@ -774,6 +801,18 @@
         htxt += '；治疗效率 ' + fmtNum(p.healEff) + '，同职业中位 ' + fmtNum(med.healEff) + '（' + pct(rhe) + '）';
       }
       d.text = htxt;
+      return d;
+    }
+
+    if (key === 'purify') {
+      d.actual = p.purify;
+      d.ref = med.purify;
+      if (med.purify == null || med.purify <= 0) { d.text = '同职业净化中位为 0，未比较'; return d; }
+      var rp = p.purify / med.purify;
+      d.ratio = rp;
+      d.anomaly = clamp01((S.purifyLow - rp) / S.purifyLow);
+      d.text = '净化（烧尸）' + fmtNum(p.purify) + '，同职业中位 ' + fmtNum(med.purify) +
+        '（' + pct(rp) + '，低位线 ' + pct(S.purifyLow) + '）';
       return d;
     }
 
@@ -1186,6 +1225,12 @@
         ' 人，未做中位数/分位判定：' + small.map(function (g) { return g.key + '(' + g.count + ')'; }).join('、') + '。' });
     }
 
+    var singers = players.filter(isSinger);
+    if (singers.length && colOf('purify') < 0) {
+      notes.push({ level: 'warn', text: '源表无净化（烧尸）列：' + singers.length +
+        ' 名歌颂职业的净化数量无法统计，也不参与疑点判定；可在「列映射」手动指定列（不伪造、不顶替）。' });
+    }
+
     var profileCounts = { output: 0, heal: 0, tank: 0 };
     players.forEach(function (p) { if (profileCounts[p.profile] != null) profileCounts[p.profile]++; });
 
@@ -1263,14 +1308,17 @@
 
     var preview = '';
     if (state.headers.length) {
-      var cols = state.headers.slice(0, 8);
+      /* 前 8 列；若净化列被映射且不在前 8 列，补进来，便于直接核对原值 */
+      var colIdx = state.headers.map(function (_, i) { return i; }).slice(0, 8);
+      var purifyIdx = colOf('purify');
+      if (purifyIdx >= 0 && colIdx.indexOf(purifyIdx) < 0) colIdx.push(purifyIdx);
       preview = '<div class="an-preview-wrap"><div class="an-preview-title">数据预览 · 前 3 行（原始值）</div>' +
         '<table class="an-table"><thead><tr><th>#</th>' +
-        cols.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') +
+        colIdx.map(function (ci) { return '<th>' + esc(state.headers[ci]) + '</th>'; }).join('') +
         '</tr></thead><tbody>' +
         state.rows.slice(0, 3).map(function (r, i) {
-          return '<tr><td class="dim">' + (i + 2) + '</td>' + cols.map(function (h, c) {
-            var v = r[c];
+          return '<tr><td class="dim">' + (i + 2) + '</td>' + colIdx.map(function (ci) {
+            var v = r[ci];
             return '<td>' + esc(v == null ? '' : (typeof v === 'number' ? fmtNum(v) : v)) + '</td>';
           }).join('') + '</tr>';
         }).join('') +
@@ -1339,6 +1387,10 @@
     }).join('');
 
     var mapped = FIELDS.filter(function (f) { return state.mapping[f.key]; }).length;
+    /* 源表没有净化列时不伪造、不顶替，只提示手动映射 */
+    var purifyHint = state.mapping.purify
+      ? ''
+      : '<div class="an-note warn" style="margin-bottom:8px">源表未检出「净化 / 烧尸 / 净化数量」列：净化维度暂不参与统计，请在下方「净化（烧尸）」手动指定列；不会用其他列顶替。</div>';
     els.mappingPanel.innerHTML =
       '<div class="an-toolbar">' +
         '<span class="an-chip">已映射 ' + mapped + ' / ' + FIELDS.length + ' 项</span>' +
@@ -1346,6 +1398,7 @@
         '<button type="button" class="btn mini" id="btnMapAuto">重新自动识别</button>' +
         '<button type="button" class="btn mini" id="btnMapClear">全部清空</button>' +
       '</div>' +
+      purifyHint +
       '<div class="map-grid">' + rows + '</div>' +
       '<div class="an-hint">值语义：<b>填 0 = 真实的 0</b>（参与统计、中位数与排名，也可能判疑点）；' +
       '<b>空白 = 该职业不做这项指标</b>（进不了分母、不进中位数、不排秩、不产生任何告警）。' +
@@ -1419,8 +1472,9 @@
       return p.name.toLowerCase().indexOf(keyword) >= 0 || p.className.toLowerCase().indexOf(keyword) >= 0;
     });
 
+    var hasPurify = colOf('purify') >= 0;
     var head = '<tr><th>#</th><th>玩家</th><th>职业</th><th>口径</th><th>编成匹配</th>' +
-      '<th>击败</th><th>助攻</th><th>死亡</th><th>输出</th><th>承伤</th><th>治疗</th>' +
+      '<th>击败</th><th>助攻</th><th>死亡</th><th>输出</th><th>承伤</th><th>治疗</th><th>净化</th>' +
       '<th>输出效率</th><th>承伤效率</th><th>击杀转化</th><th>DP/TD</th><th>异常分 / 分档</th><th>疑点</th></tr>';
 
     var body = list.map(function (p) {
@@ -1429,6 +1483,12 @@
             esc([p.match.alliance, p.match.team, p.match.squad].filter(Boolean).join(' / ') || p.match.label) +
             (p.match.source === 'live' ? ' · 实时' : ' · ' + esc(p.match.label)) + '</span>'
         : '<span class="an-na">未匹配到编成</span>';
+
+      var purifyCell = !hasPurify
+        ? '<span class="an-na" title="源表无净化列，可在「列映射」手动指定">未映射</span>'
+        : (isSinger(p)
+          ? cellValue(p, 'purify')
+          : '<span class="an-na" title="仅歌颂职业统计净化，其他职业该列空白 = 不适用、不告警">—</span>');
 
       var issueCell = p.band
         ? '<span class="sev sev-' + bandLevel(p.band) + '">' + esc(p.band) + '</span>'
@@ -1446,6 +1506,7 @@
         '<td>' + cellValue(p, 'damage') + '</td>' +
         '<td>' + cellValue(p, 'taken') + '</td>' +
         '<td>' + cellValue(p, 'heal') + '</td>' +
+        '<td>' + purifyCell + '</td>' +
         '<td>' + cellValue(p, 'outEff') + '</td>' +
         '<td>' + cellValue(p, 'takenEff') + '</td>' +
         '<td>' + cellValue(p, 'killConv', 'pct') + '</td>' +
@@ -1461,7 +1522,7 @@
         '<span class="an-chip">' + list.length + ' / ' + state.players.length + ' 人</span>' +
         '<span class="an-chip">口径：观众=治疗 · 战士=坦克 · 其余=输出</span>' +
         '<span class="an-chip">0 = 真实 0；空白 = 不适用（不进分母、不告警）</span>' +
-        '<span class="an-hint">派生指标：输出效率=伤害/(击败+助攻)；承伤效率=承伤/(击败+助攻)；击杀转化=击败/(击败+助攻)；DP/TD=伤害/承伤</span>' +
+        '<span class="an-hint">派生指标：输出效率=伤害/(击败+助攻)；承伤效率=承伤/(击败+助攻)；击杀转化=击败/(击败+助攻)；DP/TD=伤害/承伤；净化=歌颂烧尸体数（仅歌颂职业，空白不告警）</span>' +
       '</div>' +
       '<div class="an-table-wrap"><table class="an-table"><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>';
 
@@ -1495,6 +1556,7 @@
       ['总输出', o.totals.damage, '有值 ' + o.counts.damage + ' 人'],
       ['总承伤', o.totals.taken, '有值 ' + o.counts.taken + ' 人'],
       ['总治疗', o.totals.heal, '有值 ' + o.counts.heal + ' 人'],
+      ['总净化', o.totals.purify, '有值 ' + o.counts.purify + ' 人'],
       ['击杀+助攻', o.totals.ka, '有值 ' + o.counts.ka + ' 人'],
       ['疑点人数', state.issues.length, '高 ' + o.issueCounts['高'] + ' / 中 ' + o.issueCounts['中'] + ' / 低 ' + o.issueCounts['低']]
     ].map(function (k) {
@@ -1518,6 +1580,7 @@
         '<td>' + quantileCell(g.medians.damage, g.q1.damage, g.q3.damage) + ' <span class="dim">(' + g.denoms.damage + ')</span></td>' +
         '<td>' + quantileCell(g.medians.taken, g.q1.taken, g.q3.taken) + ' <span class="dim">(' + g.denoms.taken + ')</span></td>' +
         '<td>' + quantileCell(g.medians.heal, g.q1.heal, g.q3.heal) + ' <span class="dim">(' + g.denoms.heal + ')</span></td>' +
+        '<td>' + quantileCell(g.medians.purify, g.q1.purify, g.q3.purify) + ' <span class="dim">(' + g.denoms.purify + ')</span></td>' +
         '<td>' + quantileCell(g.medians.ka, g.q1.ka, g.q3.ka) + ' <span class="dim">(' + g.denoms.ka + ')</span></td>' +
         '<td>' + (g.medians.outEff == null ? '<span class="an-na">—</span>' : fmtNum(g.medians.outEff)) + '</td>' +
         '</tr>';
@@ -1566,7 +1629,7 @@
       '<div class="an-sub-title">职业构成</div><div class="comp-list">' + classes + '</div>' +
       '<div class="an-sub-title">职业分位（中位数（下四分位–上四分位）；括号为该指标参与计算的人数）</div>' +
       '<div class="an-table-wrap"><table class="an-table"><thead><tr>' +
-      '<th>职业</th><th>人数</th><th>输出中位</th><th>承伤中位</th><th>治疗中位</th><th>击杀+助攻中位</th><th>输出效率中位</th>' +
+      '<th>职业</th><th>人数</th><th>输出中位</th><th>承伤中位</th><th>治疗中位</th><th>净化中位</th><th>击杀+助攻中位</th><th>输出效率中位</th>' +
       '</tr></thead><tbody>' + groupRows + '</tbody></table></div>' +
       '<div class="an-sub-title">异常分布（哪些职业整体偏低）</div>' +
       '<div class="an-table-wrap"><table class="an-table"><thead><tr>' +
@@ -1968,6 +2031,7 @@
       valueSemantics: {
         zero: '表格填 0 = 真实的 0，参与统计、中位数、排名与疑点判定',
         blank: '空白 / 纯空格 / — / - / N/A = 该职业不做这项指标（不适用），不进分母、不排秩、不告警',
+        purify: '净化（烧尸）= 歌颂职业烧尸体数量（防止对面奶妈复活）；仅歌颂职业统计，其他职业按空白 = 不适用；源表无该列需手动映射，不伪造、不顶替',
         note: '数据结构上 0 与 null 严格区分；null 只表示不适用'
       },
       dimensions: DIMENSIONS.map(function (d) {
@@ -2005,7 +2069,7 @@
           profile: p.profile,
           profileLabel: p.profileLabel,
           wins: p.wins, assists: p.assists, ka: p.ka,
-          damage: p.damage, taken: p.taken, heal: p.heal, deaths: p.deaths,
+          damage: p.damage, taken: p.taken, heal: p.heal, purify: p.purify, deaths: p.deaths,
           ratio: p.ratio, outEff: p.outEff, takenEff: p.takenEff,
           takenRatio: p.takenRatio, killConv: p.killConv, healEff: p.healEff,
           composite: p.composite, band: p.band,
@@ -2086,7 +2150,7 @@
       issuesByRow[i.rowIndex].push(i.band + '·' + i.score.toFixed(2) + '·' + i.title);
     });
 
-    var head = ['玩家', '职业', '口径', '编成', '击败', '助攻', '死亡', '输出', '承伤', '治疗',
+    var head = ['玩家', '职业', '口径', '编成', '击败', '助攻', '死亡', '输出', '承伤', '治疗', '净化',
       'DP/TD', '输出效率', '承伤效率', '击杀转化', '综合异常分', '分档', '触发维度', '疑点'];
     var lines = [head.map(csvCell).join(',')];
 
@@ -2099,7 +2163,7 @@
       }).join('；');
       lines.push([
         p.name, p.className, p.profileLabel, matchLabel,
-        p.wins, p.assists, p.deaths, p.damage, p.taken, p.heal,
+        p.wins, p.assists, p.deaths, p.damage, p.taken, p.heal, p.purify,
         p.ratio == null ? null : p.ratio.toFixed(2),
         p.outEff, p.takenEff,
         p.killConv == null ? null : p.killConv.toFixed(3),

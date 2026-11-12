@@ -393,21 +393,21 @@
         '（已按参考图 1:1 矢量化，内嵌 SVG path，不贴位图）</div>';
     }
 
-    /* 原图 / 重绘 两态切换：只在猎龙之城与霍纳奇斯显示；选择按地图存 localStorage（独立键，不写工程） */
+    /* 原图 / 重绘 两态切换：猎龙之城 / 霍纳奇斯 / 四方战场 / 星墓高原；选择按地图存 localStorage（独立键，不写工程） */
     var baseMode = '';
     if (GM.photo && GM.photo.supported(md.id)) {
       var isPhoto = GM.photo.mode() === 'photo';
       var ph = GM.photo.image() || {};
+      var photoNote = '当前为原图底图：道路 / 崖壁 / 水域 / 冰湖 / 雪地 / 高度图默认隐藏，可在下方图层手动叠回。';
+      if (md.mode === 'club-war') photoNote = '当前为原图底图：矢量地形 / 道路默认隐藏，可在下方图层手动叠回；特殊点位与屏障按各自图层开关显示。';
+      else if (md.mode === 'capture') photoNote = '当前为原图底图：墙体 / 地面等矢量地形默认隐藏，可在下方图层手动叠回；守卫、复活点与保护结界照常显示。';
+      else if (md.mode === 'escort') photoNote = '当前为原图底图：道路 / 环道 / 河网默认隐藏，可在下方图层手动叠回；据点、广场、楼梯与中央占领圈照常显示。';
       baseMode = '<div class="base-mode" role="group" aria-label="底图模式">' +
         '<span class="base-mode-label">底图</span>' +
-        '<button type="button" class="base-mode-btn' + (isPhoto ? ' active' : '') + '" data-base-mode="photo" title="原图铺满 0,0 → ' + (ph.w || 0) + '×' + (ph.h || 0) + '；矢量重绘层默认隐藏">原图</button>' +
+        '<button type="button" class="base-mode-btn' + (isPhoto ? ' active' : '') + '" data-base-mode="photo" title="原图铺满 x ' + (ph.x || 0) + ' / y ' + (ph.y || 0) + ' → ' + (ph.w || 0) + '×' + (ph.h || 0) + ' unit；矢量地形层默认隐藏">原图</button>' +
         '<button type="button" class="base-mode-btn' + (!isPhoto ? ' active' : '') + '" data-base-mode="redraw" title="矢量重绘（全部语义层按图层面板显示）">重绘</button>' +
         '</div>' +
-        '<div class="map-desc base-mode-note">' + (isPhoto
-          ? (md.mode === 'club-war'
-            ? '当前为原图底图：矢量地形 / 道路默认隐藏，可在下方图层手动叠回；特殊点位与屏障按各自图层开关显示。'
-            : '当前为原图底图：道路 / 崖壁 / 水域 / 冰湖 / 雪地 / 高度图默认隐藏，可在下方图层手动叠回。')
-          : '当前为矢量重绘：全部语义层按图层开关显示。') + '</div>';
+        '<div class="map-desc base-mode-note">' + (isPhoto ? photoNote : '当前为矢量重绘：全部语义层按图层开关显示。') + '</div>';
     }
 
     var reserved = '';
@@ -698,6 +698,17 @@
         { id: 'redraw', name: '地形 / 道路（矢量重绘）', color: '#6b5a3f', count: '矢量', sub: true },
         { id: 'points', name: '特殊点位（雕像 / 传送 / 大旗）', color: '#d24b42', count: (md.objectives || []).length + ' 点', sub: true },
         { id: 'barriers', name: '屏障（蓝线 · 不可通行）', color: '#49b6ff', count: (md.barriers || []).length + ' 段', sub: true }
+      );
+    }
+
+    /* 四方战场 / 星墓高原：原图模式下多出纯地形矢量层的「手动叠回」行（只在原图模式出现） */
+    if (GM.photo && GM.photo.active() && md.id === 'four-club') {
+      rows.splice(1, 0, { id: 'redraw', name: '墙体 / 地面（矢量重绘）', color: '#414b58', count: '矢量', sub: true });
+    }
+    if (GM.photo && GM.photo.active() && md.id === 'star-tomb') {
+      rows.splice(1, 0,
+        { id: 'road', name: '道路 / 环道（矢量）', color: '#cbb987', count: '矢量', sub: true },
+        { id: 'water', name: '河网（矢量）', color: '#5aa0d8', count: '矢量', sub: true }
       );
     }
 

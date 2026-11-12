@@ -206,16 +206,25 @@
       '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#4b5666" stroke-width="1.2" stroke-linecap="square" opacity="0.85"></line>';
   }
 
-  /* ============================ 原图底图（猎龙之城 / 霍纳奇斯） ============================ */
+  /* ============================ 原图底图（猎龙之城 / 霍纳奇斯 / 四方战 / 星墓高原） ============================ */
 
   /* 原图模式：SVG <image> 按世界坐标 1:1 铺满（相对路径引用 assets 里的 png，不内联 base64）。
      矢量重绘层默认隐藏，可用图层面板手动叠回；模式按地图分别记在独立 localStorage 键里，
-     不写工程存档、不进撤销栈。默认原图（保真优先）。 */
+     不写工程存档、不进撤销栈。默认原图（保真优先）。
+     x / y / w / h 全部是 world unit：贴图矩形按「参考图像素 × 该图像素口径」换算，不做任何缩放拉伸。 */
   var PHOTO_KEY = 'gm.tactical.baseimg.v1';
   var PHOTO_IMAGES = {
-    'hunt-city': { href: 'assets/maps/reference/hunt-city.png', w: 960, h: 540, upp: 2 },
-    hornacis: { href: 'assets/maps/reference/hornacis/terrain.png', w: 1440, h: 810, upp: 0.75 },
-    'club-war': { href: 'assets/maps/reference/club-war/terrain.png', w: 1440, h: 810, upp: 0.75 }
+    'hunt-city': { href: 'assets/maps/reference/hunt-city.png', x: 0, y: 0, w: 960, h: 540, upp: 2 },
+    hornacis: { href: 'assets/maps/reference/hornacis/terrain.png', x: 0, y: 0, w: 1440, h: 810, upp: 0.75 },
+    'club-war': { href: 'assets/maps/reference/club-war/terrain.png', x: 0, y: 0, w: 1440, h: 810, upp: 0.75 },
+    /* 四方战场：407×543 px 井号图，geometry.unitsPerPixel = 0.8065（1 unit ≈ 1.24 px）
+       → 407×0.8065 = 328.23、543×0.8065 = 437.9，与 board 328.23×437.9 完全同比例，无变形。 */
+    'four-club': { href: 'assets/maps/reference/four-club.png', x: 0, y: 0, w: 328.23, h: 437.9, upp: 1.24 },
+    /* 星墓高原：1920×1080 px 直播截图，1 unit = 3 px（world = (px − (160,40)) / 3）。
+       板面 = 截图里 (160,40) 起的 1600×1000 px 窗口 → 贴图 x = −160/3 = −53.33、
+       y = −40/3 = −13.33、w = 1920/3 = 640、h = 1080/3 = 360；
+       渲染时按 board 矩形裁剪，可见部分正好 1600×1000 px，与矢量坐标同源、无拉伸。 */
+    'star-tomb': { href: 'assets/maps/reference/star-tomb.png', x: -53.33, y: -13.33, w: 640, h: 360, upp: 3 }
   };
   /* 原图模式下默认隐藏的矢量层（redraw = 猎龙之城整体线稿：领地色区 / 路网 / 城墙 / 祭坛 / 地基） */
   var PHOTO_VECTOR = { water: true, ice: true, snow: true, height: true, road: true, cliff: true, redraw: true };
@@ -251,8 +260,12 @@
   function photoImageSvg(md) {
     var ph = photoImage(md);
     if (!ph || !photoActive(md)) return '';
-    return '<image class="base-photo" x="0" y="0" width="' + ph.w + '" height="' + ph.h +
-      '" preserveAspectRatio="none" href="' + ph.href + '"></image>';
+    var b = (md && md.board) || { width: W, height: H };
+    /* 贴图按 board 矩形裁剪：星墓高原的截图比板面大（x/y 为负），不裁会漏到 viewBox 留白里 */
+    var clipId = 'photoClip-' + md.id;
+    return '<clipPath id="' + clipId + '"><rect x="0" y="0" width="' + b.width + '" height="' + b.height + '"></rect></clipPath>' +
+      '<image class="base-photo" clip-path="url(#' + clipId + ')" x="' + (ph.x || 0) + '" y="' + (ph.y || 0) +
+      '" width="' + ph.w + '" height="' + ph.h + '" preserveAspectRatio="none" href="' + ph.href + '"></image>';
   }
 
   /* 原图模式下给标记 / 文字加描边阴影，保证亮暗区都可读 */
@@ -510,15 +523,19 @@
 
   function artFourClub(md, project) {
     var b = md.board;
-    var p = fourClubPaths(md);
     var out = '';
-    out += '<rect x="0" y="0" width="' + b.width + '" height="' + b.height + '" rx="5" fill="#0a0d12" stroke="#2a313a" stroke-width="0.7"></rect>';
-    /* 亮色 = 可行走 / 交战区（外轮廓） */
-    out += '<path class="fc-walk" d="' + p.outer + '" fill="#414b58" stroke="#9c8657" stroke-width="0.9"></path>';
-    out += '<path d="' + p.outer + '" fill="url(#gridPattern)" opacity="0.7"></path>';
-    /* 暗色 = 墙体（18 个洞，1:1 来自阈值分割） */
-    out += '<path class="fc-wall" d="' + p.holes + '" fill="#0b0f15" stroke="#2c3742" stroke-width="0.45"></path>';
-    /* 保护结界：底图美术层（不可拖动、不进图层对象列表），仅可悬停 / 点选查看说明 */
+    /* 墙体 / 可行走地面 / 网格属于纯地形矢量层：原图模式下默认隐藏（可在图层面板叠回），重绘模式照常显示 */
+    if (layerOn('redraw', md)) {
+      var p = fourClubPaths(md);
+      out += '<rect x="0" y="0" width="' + b.width + '" height="' + b.height + '" rx="5" fill="#0a0d12" stroke="#2a313a" stroke-width="0.7"></rect>';
+      /* 亮色 = 可行走 / 交战区（外轮廓） */
+      out += '<path class="fc-walk" d="' + p.outer + '" fill="#414b58" stroke="#9c8657" stroke-width="0.9"></path>';
+      out += '<path d="' + p.outer + '" fill="url(#gridPattern)" opacity="0.7"></path>';
+      /* 暗色 = 墙体（18 个洞，1:1 来自阈值分割） */
+      out += '<path class="fc-wall" d="' + p.holes + '" fill="#0b0f15" stroke="#2c3742" stroke-width="0.45"></path>';
+      out += '<text x="' + (b.width / 2) + '" y="' + (b.height - 2.6) + '" fill="#5d6874" font-size="3" text-anchor="middle" letter-spacing="1">四方战场 · 矢量化 1:1 · 世界 ' + b.width + '×' + b.height + ' unit</text>';
+    }
+    /* 保护结界：底图美术层（不可拖动、不进图层对象列表），仅可悬停 / 点选查看说明；原图模式下也照常显示 */
     (md.barriers || []).forEach(function (br) {
       var color = factionColor(project, br.ownerFactionId) || '#6b93bb';
       var ownName = factionName(project, br.ownerFactionId) || '无归属';
@@ -530,8 +547,8 @@
         '<text class="fc-barrier-label" x="' + br.x + '" y="' + (br.y - br.radius - 1.6).toFixed(2) + '" text-anchor="middle" fill="' + U.esc(color) + '" style="font-size:2.6px">' + U.esc(br.name) + '</text>' +
         '</g>';
     });
-    out += '<text x="' + (b.width / 2) + '" y="' + (b.height - 2.6) + '" fill="#5d6874" font-size="3" text-anchor="middle" letter-spacing="1">四方战场 · 矢量化 1:1 · 世界 ' + b.width + '×' + b.height + ' unit</text>';
-    return out;
+    /* 原图模式下结界圈也压在照片上：统一加白描边阴影 */
+    return photoWrap(md, out);
   }
 
   /* 星墓高原：参考图 1920×1080 逐像素量取的底图数据（下方常量全部是图像像素坐标）。
@@ -653,19 +670,25 @@
     /* 共享层：地面地貌与通路 */
     var base = '';
 
-    /* 外圈地貌：底图只有北侧河网是可辨识地貌，按蓝通道掩膜实测折线绘制；草甸纹理不画 */
-    STAR_RIVER.forEach(function (r) {
-      var pts = r.pts.map(function (p) { return starWorld(p); });
-      base += roadLine(pts, starLen(r.w + 4)).replace(/#3b3426/g, '#1d3a4a').replace(/#6d5a34/g, '#3f6a80');
-    });
+    /* 外圈地貌：底图只有北侧河网是可辨识地貌，按蓝通道掩膜实测折线绘制；草甸纹理不画。
+       河网属于纯地形矢量层：原图模式下默认隐藏（图层面板可叠回）。 */
+    if (layerOn('water', md)) {
+      STAR_RIVER.forEach(function (r) {
+        var pts = r.pts.map(function (p) { return starWorld(p); });
+        base += roadLine(pts, starLen(r.w + 4)).replace(/#3b3426/g, '#1d3a4a').replace(/#6d5a34/g, '#3f6a80');
+      });
+    }
 
-    /* 外圈环道（闭合，128 折点）+ 四条重生点→广场→高台的通道，线宽按 unit 换算（11 px → 3.67 unit） */
-    var ring = STAR_RING.map(starWorld).concat([starWorld(STAR_RING[0])]);
-    base += roadLine(ring, starLen(11));
-    STAR_ROADS.forEach(function (r) {
-      var pts = r.pts.map(starWorld);
-      base += roadLine(pts, starLen(11));
-    });
+    /* 外圈环道（闭合，128 折点）+ 四条重生点→广场→高台的通道，线宽按 unit 换算（11 px → 3.67 unit）。
+       道路同为纯地形矢量层：原图模式下默认隐藏。 */
+    if (layerOn('road', md)) {
+      var ring = STAR_RING.map(starWorld).concat([starWorld(STAR_RING[0])]);
+      base += roadLine(ring, starLen(11));
+      STAR_ROADS.forEach(function (r) {
+        var pts = r.pts.map(starWorld);
+        base += roadLine(pts, starLen(11));
+      });
+    }
 
     /* 四边据点（重生点）与四广场圆台：统一画正圆（不是实量椭圆），半径按 STAR_PX 换算 */
     STAR_OUTPOSTS.forEach(function (o) {
@@ -692,9 +715,13 @@
     var w = starR(px1 - px0), h = starR(py1 - py0);
     var tier = '';
     if (upper) {
-      tier += '<rect x="' + px0 + '" y="' + py0 + '" width="' + w + '" height="' + h + '" fill="rgba(206,199,178,0.14)" stroke="#cfc7b2" stroke-width="' + starLen(1.4) + '"></rect>' +
-        '<rect x="' + (px0 + starLen(8)) + '" y="' + (py0 + starLen(8)) + '" width="' + starR(w - starLen(16)) + '" height="' + starR(h - starLen(16)) + '" fill="none" stroke="#8f8877" stroke-width="' + starLen(0.9) + '" stroke-dasharray="' + starLen(5) + ' ' + starLen(5) + '" opacity="0.7"></rect>';
-    } else {
+      /* 中央高台外框 = 占领圈范围，原图模式下也保留（可交互）；内圈虚线回廊属于结构装饰，原图模式隐藏 */
+      tier += '<rect x="' + px0 + '" y="' + py0 + '" width="' + w + '" height="' + h + '" fill="rgba(206,199,178,0.14)" stroke="#cfc7b2" stroke-width="' + starLen(1.4) + '"></rect>';
+      if (!photoActive(md)) {
+        tier += '<rect x="' + (px0 + starLen(8)) + '" y="' + (py0 + starLen(8)) + '" width="' + starR(w - starLen(16)) + '" height="' + starR(h - starLen(16)) + '" fill="none" stroke="#8f8877" stroke-width="' + starLen(0.9) + '" stroke-dasharray="' + starLen(5) + ' ' + starLen(5) + '" opacity="0.7"></rect>';
+      }
+    } else if (!photoActive(md)) {
+      /* 台下镂空投影 / 斜纹 / 说明是纯地形结构示意，原图模式下隐藏（可切「重绘」查看） */
       tier += '<rect x="' + px0 + '" y="' + py0 + '" width="' + w + '" height="' + h + '" fill="none" stroke="#7f8b99" stroke-width="' + starLen(1.2) + '" stroke-dasharray="' + starLen(7) + ' ' + starLen(5) + '" opacity="0.85"></rect>';
       for (var i = 0; i < 7; i++) {
         var t = (i + 1) / 8;
@@ -703,11 +730,15 @@
       tier += '<text x="' + starR(px0 + w / 2) + '" y="' + starR(py0 - starLen(4)) + '" fill="#8f99a6" font-size="' + starLen(6) + '" text-anchor="middle" opacity="0.8">台下镂空 · 高台投影</text>';
     }
 
-    var titlePt = starWorld([960, 340]);
-    tier += '<text x="' + titlePt[0] + '" y="' + titlePt[1] + '" fill="#2b3542" font-size="' + starLen(10) + '" text-anchor="middle" letter-spacing="' + starLen(4) + '">' + (upper ? '二层 · 中央高台' : '地面层 · 台下镂空可穿行') + '</text>';
+    /* 层标题是矢量层的文字说明，原图模式下不压在照片上 */
+    if (!photoActive(md)) {
+      var titlePt = starWorld([960, 340]);
+      tier += '<text x="' + titlePt[0] + '" y="' + titlePt[1] + '" fill="#2b3542" font-size="' + starLen(10) + '" text-anchor="middle" letter-spacing="' + starLen(4) + '">' + (upper ? '二层 · 中央高台' : '地面层 · 台下镂空可穿行') + '</text>';
+    }
 
+    /* 原图模式下：据点 / 广场 / 楼梯 / 高台这些可识别对象照常显示，统一套 photoHalo 描边 */
     return '<g class="star-tier ' + (upper ? 'star-tier-upper' : 'star-tier-ground') +
-      '" data-level="' + (upper ? 'upper' : 'ground') + '">' + base + tier + '</g>';
+      '" data-level="' + (upper ? 'upper' : 'ground') + '">' + photoWrap(md, base + tier) + '</g>';
   }
 
   /* 霍纳奇斯山脉底图：几何全部来自 data/maps.js 内联矢量（一次性脚本矢量化）。
@@ -1205,7 +1236,8 @@
         if (visibleLevel && (s.level || 'ground') !== visibleLevel) return;
         out += fourClubSpawnNode(s, project);
       });
-      return out;
+      /* 原图模式下守卫 / 复活点压在照片上：白描边 + 深阴影 */
+      return photoWrap(md, out);
     }
 
     (md.objectives || []).forEach(function (o) {
